@@ -11,7 +11,7 @@ from playwright.sync_api import sync_playwright
 # ----------------------------------------------------
 TARGET_URL = "https://pf.kakao.com/_exdxors/posts"
 OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "glm-ocr"  # 또는 ollama에 구동 중인 비전 모델명 (ex: minicpm-v, llama3.2-vision 등)
+OLLAMA_MODEL = "qwen3.5:4b"  # 또는 ollama에 구동 중인 비전 모델명 (ex: minicpm-v, llama3.2-vision 등)
 
 # ----------------------------------------------------
 # 1. Playwright 크롤링
@@ -69,19 +69,6 @@ def run_ollama_ocr(image_path: str) -> dict | None:
 
     # 2. Ollama API 요청 페이로드 구성
     prompt = """이미지 속 주간 식단표를 분석하여 아래 JSON 포맷으로만 출력해줘. 다른 설명이나 마크다운 텍스트 없이 Pure JSON 데이터만 반환해줘.
-    JSON 포맷 예시는 아래와 같아:
-    {
-        "title": "주간 식단표 제목",
-        "weekly_menu": [
-            {
-            "day_of_week": "월",
-            "date": "YYYY-MM-DD",
-            "main_menus": ["메뉴1", "메뉴2"],
-            "side_menus": ["반찬1", "반찬2"],
-            "calories": 000
-            }
-        ]
-    }
     """
     payload = {
         "model": OLLAMA_MODEL,
