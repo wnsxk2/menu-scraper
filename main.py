@@ -14,7 +14,7 @@ from playwright.sync_api import sync_playwright
 # ----------------------------------------------------
 TARGET_URL = "https://pf.kakao.com/_exdxors/posts"
 OPENAI_URL = "https://api.openai.com/v1/responses"
-OPENAI_MODEL = "gpt-4o-mini"
+OPENAI_MODEL = "gpt-4o"
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ENV_FILE = Path(__file__).with_name(".env")
 
@@ -131,7 +131,8 @@ def run_openai_ocr(image_path: str) -> dict | None:
 
         prompt = f"""이미지 속 주간 식단표를 정확히 추출해라.
 날짜는 이미지의 월/일과 실행 연도 {current_year}를 조합해 YYYY-MM-DD로 작성한다.
-밥, 국, 강조된 주메뉴는 main_menus에, 나머지는 side_menus에 원문 순서대로 넣는다.
+강조된 주메뉴는 main_menus에, 나머지는 side_menus에 원문 순서대로 넣는다.
+원산지 표시는 제외하고 메뉴명만 추출한다.
 칼로리는 표 하단 값을 정수로 읽고, 이미지에 없는 값은 추측하지 않는다.
 필수 값 하나라도 없거나 명확히 읽을 수 없으면 값을 만들지 말고 요청을 거부한다.
 """
