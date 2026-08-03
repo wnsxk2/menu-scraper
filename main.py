@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
 # ----------------------------------------------------
@@ -105,22 +106,8 @@ def detect_image_mime(image_data: bytes) -> str:
 
 
 def load_openai_api_key() -> str:
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if api_key:
-        return api_key
-
-    try:
-        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-            name, separator, value = line.partition("=")
-            if separator and name.strip() == "OPENAI_API_KEY":
-                value = value.strip()
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                    value = value[1:-1]
-                return value.strip()
-    except FileNotFoundError:
-        pass
-
-    return ""
+    load_dotenv(dotenv_path=ENV_FILE, override=False)
+    return os.environ.get("OPENAI_API_KEY", "").strip()
 
 
 def run_openai_ocr(image_path: str) -> dict | None:

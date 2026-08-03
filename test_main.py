@@ -57,7 +57,7 @@ class OpenAiOcrTest(unittest.TestCase):
     def test_loads_api_key_from_dotenv_when_environment_is_missing(self, post):
         post.return_value = completed_response()
         env_file = tempfile.NamedTemporaryFile(mode="w", suffix=".env", encoding="utf-8")
-        env_file.write('OPENAI_API_KEY="file-key"\n')
+        env_file.write('OPENAI_KEY_PREFIX="file"\nOPENAI_API_KEY="${OPENAI_KEY_PREFIX}-key"\n')
         env_file.flush()
         self.addCleanup(env_file.close)
 
