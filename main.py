@@ -3,6 +3,8 @@ import re
 import time
 import base64
 import json
+from pathlib import Path
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -13,6 +15,7 @@ TARGET_URL = "https://pf.kakao.com/_exdxors/posts"
 OPENAI_URL = "https://api.openai.com/v1/responses"
 OPENAI_MODEL = "gpt-4o-mini"
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+ENV_FILE = Path(__file__).with_name(".env")
 
 MENU_SCHEMA = {
     "type": "object",
@@ -101,14 +104,33 @@ def detect_image_mime(image_data: bytes) -> str:
     raise ValueError("지원하지 않는 이미지 형식입니다. PNG 또는 JPEG가 필요합니다.")
 
 
+def load_openai_api_key() -> str:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if api_key:
+        return api_key
+
+    try:
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            name, separator, value = line.partition("=")
+            if separator and name.strip() == "OPENAI_API_KEY":
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                return value.strip()
+    except FileNotFoundError:
+        pass
+
+    return ""
+
+
 def run_openai_ocr(image_path: str) -> dict | None:
     """주간 식단표 이미지를 OpenAI Responses API로 구조화합니다."""
     print(f"2. OpenAI 모델({OPENAI_MODEL})로 OCR 요청 중...")
 
     try:
-        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        api_key = load_openai_api_key()
         if not api_key:
-            raise ValueError("OPENAI_API_KEY 환경변수가 필요합니다.")
+            raise ValueError("OPENAI_API_KEY 환경변수 또는 .env 설정이 필요합니다.")
 
         with open(image_path, "rb") as image_file:
             image_data = image_file.read()

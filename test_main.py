@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import requests
@@ -51,6 +52,26 @@ class OpenAiOcrTest(unittest.TestCase):
         image.flush()
         self.addCleanup(image.close)
         return image.name
+
+    @patch("main.requests.post")
+    def test_loads_api_key_from_dotenv_when_environment_is_missing(self, post):
+        post.return_value = completed_response()
+        env_file = tempfile.NamedTemporaryFile(mode="w", suffix=".env", encoding="utf-8")
+        env_file.write('OPENAI_API_KEY="file-key"\n')
+        env_file.flush()
+        self.addCleanup(env_file.close)
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(main, "ENV_FILE", Path(env_file.name), create=True),
+        ):
+            result = main.run_openai_ocr(self.write_png_named_jpg())
+
+        self.assertEqual(result, MENU_DATA)
+        self.assertEqual(
+            post.call_args.kwargs["headers"]["Authorization"],
+            "Bearer file-key",
+        )
 
     @patch("main.requests.post")
     def test_sends_png_with_strict_schema_and_returns_existing_contract(self, post):
@@ -105,8 +126,13 @@ class OpenAiOcrTest(unittest.TestCase):
 
     @patch("main.requests.post")
     def test_missing_key_or_unsupported_image_does_not_call_api(self, post):
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertIsNone(main.run_openai_ocr("missing.jpg"))
+        with tempfile.TemporaryDirectory() as directory:
+            missing_env_file = Path(directory) / ".env"
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(main, "ENV_FILE", missing_env_file, create=True),
+            ):
+                self.assertIsNone(main.run_openai_ocr("missing.jpg"))
         post.assert_not_called()
 
         image = tempfile.NamedTemporaryFile(suffix=".jpg")
