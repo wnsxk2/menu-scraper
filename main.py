@@ -7,11 +7,45 @@ import requests
 from playwright.sync_api import sync_playwright
 
 # ----------------------------------------------------
-# 설정 (Ollama 서버 및 카카오 채널 URL)
+# 설정 (OpenAI API 및 카카오 채널 URL)
 # ----------------------------------------------------
 TARGET_URL = "https://pf.kakao.com/_exdxors/posts"
-OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "qwen3.5:4b"  # 또는 ollama에 구동 중인 비전 모델명 (ex: minicpm-v, llama3.2-vision 등)
+OPENAI_URL = "https://api.openai.com/v1/responses"
+OPENAI_MODEL = "gpt-4o-mini"
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+MENU_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "weekly_menu": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "day_of_week": {
+                        "type": "string",
+                        "enum": ["월", "화", "수", "목", "금", "토", "일"],
+                    },
+                    "date": {"type": "string"},
+                    "main_menus": {"type": "array", "items": {"type": "string"}},
+                    "side_menus": {"type": "array", "items": {"type": "string"}},
+                    "calories": {"type": "integer"},
+                },
+                "required": [
+                    "day_of_week",
+                    "date",
+                    "main_menus",
+                    "side_menus",
+                    "calories",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["title", "weekly_menu"],
+    "additionalProperties": False,
+}
 
 # ----------------------------------------------------
 # 1. Playwright 크롤링
@@ -57,50 +91,104 @@ def fetch_menu_image_url():
         return target_img_url
 
 # ----------------------------------------------------
-# 2. Ollama API 기반 VLM OCR 추론
+# 2. OpenAI Responses API 기반 VLM OCR 추론
 # ----------------------------------------------------
-def run_ollama_ocr(image_path: str) -> dict | None:
-    """다운로드한 이미지를 base64로 인코딩하여 Ollama API로 전달합니다."""
-    print(f"2. Ollama 모델({OLLAMA_MODEL})로 OCR 요청 중...")
-    
-    # 1. 이미지 파일을 base64 문자열로 변환
-    with open(image_path, "rb") as f:
-        encoded_image = base64.b64encode(f.read()).decode("utf-8")
+def detect_image_mime(image_data: bytes) -> str:
+    if image_data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image_data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    raise ValueError("지원하지 않는 이미지 형식입니다. PNG 또는 JPEG가 필요합니다.")
 
-    # 2. Ollama API 요청 페이로드 구성
-    prompt = """이미지 속 주간 식단표를 분석하여 아래 JSON 포맷으로만 출력해줘. 다른 설명이나 마크다운 텍스트 없이 Pure JSON 데이터만 반환해줘.
-    """
-    payload = {
-        "model": OLLAMA_MODEL,
-        "format": "json",
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [encoded_image]
-            }
-        ],
-        "stream": False
-    }
 
-    # 3. HTTP POST 요청
+def run_openai_ocr(image_path: str) -> dict | None:
+    """주간 식단표 이미지를 OpenAI Responses API로 구조화합니다."""
+    print(f"2. OpenAI 모델({OPENAI_MODEL})로 OCR 요청 중...")
+
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=120)
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY 환경변수가 필요합니다.")
+
+        with open(image_path, "rb") as image_file:
+            image_data = image_file.read()
+        if not image_data:
+            raise ValueError("이미지 파일이 비어 있습니다.")
+        if len(image_data) > MAX_IMAGE_BYTES:
+            raise ValueError("이미지는 10 MiB 이하여야 합니다.")
+        mime_type = detect_image_mime(image_data)
+        encoded_image = base64.b64encode(image_data).decode("utf-8")
+        current_year = time.localtime().tm_year
+
+        prompt = f"""이미지 속 주간 식단표를 정확히 추출해라.
+날짜는 이미지의 월/일과 실행 연도 {current_year}를 조합해 YYYY-MM-DD로 작성한다.
+밥, 국, 강조된 주메뉴는 main_menus에, 나머지는 side_menus에 원문 순서대로 넣는다.
+칼로리는 표 하단 값을 정수로 읽고, 이미지에 없는 값은 추측하지 않는다.
+필수 값 하나라도 없거나 명확히 읽을 수 없으면 값을 만들지 말고 요청을 거부한다.
+"""
+        payload = {
+            "model": OPENAI_MODEL,
+            "store": False,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:{mime_type};base64,{encoded_image}",
+                            "detail": "high",
+                        },
+                    ],
+                }
+            ],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "weekly_menu",
+                    "strict": True,
+                    "schema": MENU_SCHEMA,
+                }
+            },
+        }
+        response = requests.post(
+            OPENAI_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=120,
+        )
         response.raise_for_status()
-        result_json = response.json()
-        content = result_json.get("message", {}).get("content", "")
-        if not content:
-            raise ValueError("Ollama 응답에 JSON 콘텐츠가 없습니다.")
-        return json.loads(content)
-    except Exception as e:
-        print(f"❌ Ollama API 호출 또는 JSON 처리 에러: {e}")
+        result = response.json()
+        if result.get("status") != "completed":
+            reason = result.get("incomplete_details", {}).get("reason", "unknown")
+            raise ValueError(f"OpenAI 응답이 완료되지 않았습니다: {reason}")
+
+        text_parts = []
+        for output in result.get("output", []):
+            if output.get("type") != "message":
+                continue
+            for content in output.get("content", []):
+                if content.get("type") == "refusal":
+                    raise ValueError("OpenAI가 OCR 요청을 거부했습니다.")
+                if content.get("type") == "output_text" and content.get("text"):
+                    text_parts.append(content["text"])
+
+        if text_parts:
+            return json.loads("".join(text_parts))
+
+        raise ValueError("OpenAI 응답에 구조화된 JSON 콘텐츠가 없습니다.")
+    except Exception as error:
+        print(f"❌ OpenAI API 호출 또는 JSON 처리 에러: {error}")
         return None
 
 # ----------------------------------------------------
 # 3. 메인 실행부
 # ----------------------------------------------------
 def main():
-    print("=== [그린블루 백오피스] 주간 식단표 크롤링 & Ollama OCR 파이프라인 ===")
+    print("=== [그린블루 백오피스] 주간 식단표 크롤링 & OpenAI OCR 파이프라인 ===")
     
     # Step 1. 식단표 이미지 URL 크롤링
     img_url = fetch_menu_image_url()
@@ -115,9 +203,9 @@ def main():
         f.write(img_data)
     print(f"💾 이미지 저장 완료: {saved_path}")
 
-    # Step 3. Ollama 추론 실행
+    # Step 3. OpenAI 추론 실행
     start_time = time.time()
-    menu_data = run_ollama_ocr(saved_path)
+    menu_data = run_openai_ocr(saved_path)
     
     print(f"\n⏱️ 소요시간: {time.time() - start_time:.2f}초")
     if menu_data is None:
